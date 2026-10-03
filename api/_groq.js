@@ -1,19 +1,23 @@
-// Groq API call karne ka helper (Groq OpenAI jaisa hi API deta hai)
+// Helper for calling the Groq API
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 export async function callGroq(body) {
   const model = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
-  const request = { model, ...body };
+  const request = {
+    model,
+    ...body,
+  };
 
-  // gpt-oss model pehle sochta hai, "low" rakha taaki jawab jaldi aaye
+  // Keep reasoning low for faster responses
   if (model.includes("gpt-oss")) {
     request.reasoning_effort = "low";
   }
 
-  // kabhi kabhi tool call fail ho jaata hai, isliye 2 baar try
+  // Try the request twice if it fails
   let lastError = "";
+
   for (let attempt = 1; attempt <= 2; attempt++) {
     const res = await fetch(GROQ_URL, {
       method: "POST",
@@ -30,12 +34,14 @@ export async function callGroq(body) {
     }
 
     lastError = "Groq error " + res.status + ": " + (await res.text());
+
     console.log(lastError);
   }
+
   throw new Error(lastError);
 }
 
-// response bhejne ka simple function (Vercel aur local server dono me chalega)
+// Send JSON response
 export function sendJson(res, status, data) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");

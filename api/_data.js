@@ -1,7 +1,7 @@
-// Aura Skincare ka saara data yahan hai - brand info, mock orders, tools aur prompt
-// (file ka naam _ se start hai isliye Vercel isko API route nahi banata)
+// Aura Skincare data, orders, tools and AI prompt
+// File starts with _ so Vercel does not treat it as an API route
 
-// mock order database
+// Mock order database
 export const orders = {
   "ORD-101": {
     order_id: "ORD-101",
@@ -13,6 +13,7 @@ export const orders = {
     tracking_id: "BD-982103",
     notes: "Expected by 6 PM today",
   },
+
   "ORD-102": {
     order_id: "ORD-102",
     customer_name: "Rahul Verma",
@@ -24,6 +25,7 @@ export const orders = {
     notes: "Delivered 14 days ago",
     days_since_delivery: 14,
   },
+
   "ORD-103": {
     order_id: "ORD-103",
     customer_name: "Ananya Patel",
@@ -36,92 +38,160 @@ export const orders = {
   },
 };
 
-// speech se order id alag alag form me aata hai
-// jaise "ord 101", "order one zero one", "ORD-101" -> sabko "ORD-101" bana do
+// Convert different speech formats into one order ID
 export function cleanOrderId(input) {
   if (!input) return "";
+
   let text = String(input).toLowerCase();
 
   const numberWords = {
-    zero: "0", oh: "0", one: "1", two: "2", three: "3", four: "4",
-    five: "5", six: "6", seven: "7", eight: "8", nine: "9",
+    zero: "0",
+    oh: "0",
+    one: "1",
+    two: "2",
+    three: "3",
+    four: "4",
+    five: "5",
+    six: "6",
+    seven: "7",
+    eight: "8",
+    nine: "9",
   };
+
   for (const word in numberWords) {
-    text = text.replace(new RegExp("\\b" + word + "\\b", "g"), numberWords[word]);
+    text = text.replace(
+      new RegExp("\\b" + word + "\\b", "g"),
+      numberWords[word],
+    );
   }
 
   const digits = text.replace(/\D/g, "");
+
   if (!digits) return "";
+
   return "ORD-" + digits;
 }
 
-// tool 1: order details nikalna
+// Get order details
 function getOrderDetails(orderId) {
   const id = cleanOrderId(orderId);
+
   if (!id) {
-    return { found: false, message: "No order ID given. Ask the customer for their order ID." };
+    return {
+      found: false,
+      message: "No order ID given. Ask the customer for their order ID.",
+    };
   }
+
   const order = orders[id];
+
   if (!order) {
-    return { found: false, searched_id: id, message: "No order found with this ID. Ask customer to repeat or verify it." };
+    return {
+      found: false,
+      searched_id: id,
+      message:
+        "No order found with this ID. Ask customer to repeat or verify it.",
+    };
   }
-  return { found: true, ...order };
+
+  return {
+    found: true,
+    ...order,
+  };
 }
 
-// tool 2: order cancel karna (sirf Processing wale cancel hote hai)
+// Cancel order only when its status is Processing
 function cancelOrder(orderId) {
   const id = cleanOrderId(orderId);
   const order = orders[id];
+
   if (!order) {
-    return { success: false, searched_id: id, message: "No order found with this ID." };
+    return {
+      success: false,
+      searched_id: id,
+      message: "No order found with this ID.",
+    };
   }
+
   if (order.status === "Processing") {
-    // mock hai, isliye actual database update nahi kar rahe
-    return { success: true, order_id: id, message: "Order cancelled successfully." };
+    // This is a mock database, so the order is not actually changed
+    return {
+      success: true,
+      order_id: id,
+      message: "Order cancelled successfully.",
+    };
   }
+
   if (order.status === "Delivered") {
-    return { success: false, order_id: id, status: order.status, message: "Order is already delivered, so it cannot be cancelled. Check the return policy instead." };
+    return {
+      success: false,
+      order_id: id,
+      status: order.status,
+      message:
+        "Order is already delivered, so it cannot be cancelled. Check the return policy instead.",
+    };
   }
+
   return {
     success: false,
     order_id: id,
     status: order.status,
-    message: "Order is already " + order.status + ", so it cannot be cancelled as per policy. Customer can refuse the delivery at the doorstep.",
+    message:
+      "Order is already " +
+      order.status +
+      ", so it cannot be cancelled as per policy. Customer can refuse the delivery at the doorstep.",
   };
 }
 
-// LLM ko jo tool call aaye, usko yahan run karte hai
+// Run the tool requested by the AI
 export function runTool(name, args) {
-  if (name === "get_order_details") return getOrderDetails(args.order_id);
-  if (name === "cancel_order") return cancelOrder(args.order_id);
-  return { error: "Unknown tool: " + name };
+  if (name === "get_order_details") {
+    return getOrderDetails(args.order_id);
+  }
+
+  if (name === "cancel_order") {
+    return cancelOrder(args.order_id);
+  }
+
+  return {
+    error: "Unknown tool: " + name,
+  };
 }
 
-// LLM ko batate hai ki kaun se tools available hai
+// Tools available to the AI
 export const tools = [
   {
     type: "function",
     function: {
       name: "get_order_details",
-      description: "Get live details of a customer's order (status, product, value, courier, tracking, delivery info). Use this for any question about a specific order.",
+      description:
+        "Get live details of a customer's order (status, product, value, courier, tracking, delivery info). Use this for any question about a specific order.",
       parameters: {
         type: "object",
         properties: {
-          order_id: { type: "string", description: "Order ID like ORD-101" },
+          order_id: {
+            type: "string",
+            description: "Order ID like ORD-101",
+          },
         },
         required: ["order_id"],
       },
     },
   },
+
   {
     type: "function",
     function: {
       name: "cancel_order",
-      description: "Cancel an order. Only call this after the customer has clearly confirmed they want to cancel.",
+      description:
+        "Cancel an order. Only call this after the customer has clearly confirmed they want to cancel.",
       parameters: {
         type: "object",
         properties: {
-          order_id: { type: "string", description: "Order ID like ORD-103" },
+          order_id: {
+            type: "string",
+            description: "Order ID like ORD-103",
+          },
         },
         required: ["order_id"],
       },
@@ -129,7 +199,7 @@ export const tools = [
   },
 ];
 
-// Aria ka system prompt (brand info + rules)
+// Aria's system prompt with brand information and rules
 export const SYSTEM_PROMPT = `You are Aria, a customer support specialist at Aura Skincare, a premium organic Indian skincare brand focused on simple, effective products made with thoughtfully selected ingredients. You are talking to a customer on a VOICE call.
 
 HOW TO SPEAK

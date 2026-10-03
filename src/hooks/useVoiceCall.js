@@ -81,7 +81,12 @@ export default function useVoiceCall() {
   }
 
   function addLine(who, text) {
-    const line = { who, text, time: timeNow() };
+    const line = {
+      who,
+      text,
+      time: timeNow(),
+    };
+
     linesRef.current = [...linesRef.current, line];
     setLines(linesRef.current);
   }
@@ -122,15 +127,21 @@ export default function useVoiceCall() {
     });
   }
 
-  // Speak the complete reply sentence by sentence
+  // Speak the complete reply
   async function speak(text, newHint = "") {
     interruptedRef.current = false;
     changeStatus("speaking", newHint);
 
+    // Clear any old speech that is stuck
+    window.speechSynthesis.cancel();
+
     const parts = text.match(/[^.!?]+[.!?]*/g) || [text];
 
     for (const part of parts) {
-      if (interruptedRef.current || !activeRef.current) break;
+      if (interruptedRef.current || !activeRef.current) {
+        break;
+      }
+
       await speakPart(part.trim());
     }
   }
@@ -150,12 +161,24 @@ export default function useVoiceCall() {
     changeStatus("listening");
 
     const recognition = new SpeechRecognition();
+
     recognition.lang = "en-IN";
     recognition.interimResults = true;
-    recognition.continuous = false;
+    recognition.continuous = true;
+
     recognitionRef.current = recognition;
 
     let finalText = "";
+    let silenceTimer = null;
+
+    // If user says nothing for 10 seconds, stop listening
+    let noSpeechTimer = setTimeout(() => recognition.stop(), 10000);
+
+    // Stop listening when user is quiet for a moment
+    function waitForSilence() {
+      clearTimeout(silenceTimer);
+      silenceTimer = setTimeout(() => recognition.stop(), 1300);
+    }
 
     recognition.onresult = (event) => {
       let interim = "";
@@ -169,6 +192,9 @@ export default function useVoiceCall() {
       }
 
       setLiveText(finalText + interim);
+
+      clearTimeout(noSpeechTimer);
+      waitForSilence();
     };
 
     recognition.onerror = (event) => {
@@ -181,12 +207,19 @@ export default function useVoiceCall() {
         setError(
           "Microphone access is blocked. Please allow the mic in your browser and start the call again.",
         );
+
         endCall();
+      }
+
+      if (event.error === "network") {
+        setError("Voice input needs internet. Please check your connection.");
       }
     };
 
     // When the user stops speaking, handle the text
     recognition.onend = () => {
+      clearTimeout(silenceTimer);
+      clearTimeout(noSpeechTimer);
       setLiveText("");
       handleUserSpeech(finalText.trim());
     };
@@ -207,7 +240,9 @@ export default function useVoiceCall() {
 
       if (silenceRef.current >= 2) {
         silenceRef.current = 0;
+
         addLine("agent", NOT_HEARD);
+
         await speak(NOT_HEARD);
       }
 
@@ -216,6 +251,7 @@ export default function useVoiceCall() {
     }
 
     silenceRef.current = 0;
+
     await askAria(text);
   }
 
@@ -225,7 +261,10 @@ export default function useVoiceCall() {
 
     messagesRef.current = [
       ...messagesRef.current,
-      { role: "user", content: text },
+      {
+        role: "user",
+        content: text,
+      },
     ];
 
     changeStatus("thinking");
@@ -236,15 +275,33 @@ export default function useVoiceCall() {
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: messagesRef.current }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: messagesRef.current,
+        }),
       });
 
-      const data = await res.json();
+      // Read response as text first
+      const responseText = await res.text();
 
-      if (!res.ok) throw new Error(data.error || "Server error");
+      let data = {};
+
+      // Convert response text into JSON
+      try {
+        data = responseText ? JSON.parse(responseText) : {};
+      } catch (e) {
+        throw new Error("Server returned an invalid response.");
+      }
+
+      // Handle server errors
+      if (!res.ok) {
+        throw new Error(data.error || "Server error");
+      }
 
       reply = data.reply || NOT_HEARD;
+      setError("");
 
       if (data.toolLogs && data.toolLogs.length) {
         addToolLogs(data.toolLogs);
@@ -253,6 +310,7 @@ export default function useVoiceCall() {
       console.log("chat failed:", err);
 
       setError("Could not reach the server: " + err.message);
+
       reply = TECH_ISSUE;
     }
 
@@ -262,7 +320,10 @@ export default function useVoiceCall() {
 
     messagesRef.current = [
       ...messagesRef.current,
-      { role: "assistant", content: reply },
+      {
+        role: "assistant",
+        content: reply,
+      },
     ];
 
     addLine("agent", reply);
@@ -290,12 +351,19 @@ export default function useVoiceCall() {
       setError(
         "Microphone access is needed for the call. Please allow it and try again.",
       );
+
       return;
     }
 
     // Reset call data
     activeRef.current = true;
-    messagesRef.current = [{ role: "assistant", content: GREETING }];
+    messagesRef.current = [
+      {
+        role: "assistant",
+        content: GREETING,
+      },
+    ];
+
     linesRef.current = [];
     toolsRef.current = [];
     silenceRef.current = 0;
@@ -309,6 +377,7 @@ export default function useVoiceCall() {
     addLine("agent", GREETING);
 
     await speak(GREETING);
+
     listen();
   }
 
@@ -345,15 +414,20 @@ export default function useVoiceCall() {
         error:
           "The customer did not say anything, so there is nothing to summarise.",
       });
+
       return;
     }
 
-    setSummary({ loading: true });
+    setSummary({
+      loading: true,
+    });
 
     try {
       const res = await fetch("/api/summary", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           transcript,
           toolLogs: tools,
@@ -362,7 +436,9 @@ export default function useVoiceCall() {
 
       const data = await res.json();
 
-      if (!res.ok) throw new Error(data.error || "Server error");
+      if (!res.ok) {
+        throw new Error(data.error || "Server error");
+      }
 
       // Add call duration and other details
       setSummary({
